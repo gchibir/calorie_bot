@@ -3,7 +3,8 @@ import logging
 import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-import asyncio
+from fastapi import FastAPI, Request
+import uvicorn
 
 # Логирование
 logging.basicConfig(level=logging.INFO)
@@ -11,6 +12,9 @@ logging.basicConfig(level=logging.INFO)
 # Получаем токены из переменных окружения
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 SPOONACULAR_KEY = os.environ.get("SPOONACULAR_KEY")
+
+# Создаём приложение
+app = Application.builder().token(TELEGRAM_TOKEN).build()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -55,24 +59,27 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Отправь название блюда словами — например, «гречка с курицей»."
     )
 
-def main():
+# Добавляем обработчики
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+
+# FastAPI приложение для обработки Webhook
+fastapi_app = FastAPI()
+
+@fastapi_app.post("/")
+async def handle_telegram_webhook(request: Request):
+    """Обрабатываем входящие обновления от Telegram"""
+    update_data = await request.json()
+    update = Update.de_json(update_data)
+    await app.update_queue.put(update)
+    return {"status": "ok"}
+
+if __name__ == "__main__":
     if not TELEGRAM_TOKEN:
         raise ValueError("TELEGRAM_TOKEN не установлен!")
     if not SPOONACULAR_KEY:
         raise ValueError("SPOONACULAR_KEY не установлен!")
 
-    # Создаём приложение
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
-
-    # Добавляем обработчики
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-
-    # Запускаем бота через метод, который не использует Updater
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(app.run_polling())
-
-if __name__ == "__main__":
-    main()
+    # Запускаем FastAPI сервер
+    uvicorn.run(fastapi_app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
