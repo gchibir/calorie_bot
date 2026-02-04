@@ -7,6 +7,7 @@ from telegram.ext import (
 )
 from fastapi import FastAPI, Request
 import uvicorn
+import threading
 
 # Логирование
 logging.basicConfig(level=logging.INFO)
@@ -75,18 +76,25 @@ async def handle_telegram_webhook(request: Request):
     try:
         update_data = await request.json()
         update = Update.de_json(update_data)
-        # Обрабатываем обновление через updater
-        updater.process_update(update)
+        # Добавляем обновление в очередь
+        updater.bot._message_updates.append(update)
         return {"status": "ok"}
     except Exception as e:
         print(f"Ошибка при обработке webhook: {e}")
         return {"status": "error"}
+
+def run_updater():
+    updater.start_polling()
 
 if __name__ == "__main__":
     if not TELEGRAM_TOKEN:
         raise ValueError("TELEGRAM_TOKEN не установлен!")
     if not SPOONACULAR_KEY:
         raise ValueError("SPOONACULAR_KEY не установлен!")
+
+    # Запускаем updater в отдельном потоке
+    thread = threading.Thread(target=run_updater, daemon=True)
+    thread.start()
 
     # Запускаем FastAPI сервер
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), reload=False)
