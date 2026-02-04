@@ -10,7 +10,11 @@ import uvicorn
 import threading
 
 # Логирование
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # Получаем токены из переменных окружения
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -50,7 +54,8 @@ def handle_text(update: Update, context: CallbackContext):
                 "❌ Не нашёл информацию об этом блюде. Попробуй другое название."
             )
     except Exception as e:
-        update.message.reply_text(f"⚠️ Ошибка: {str(e)}")
+        logger.error(f"Ошибка при запросе к Spoonacular: {e}")
+        update.message.reply_text(f"⚠️ Ошибка при поиске: {str(e)}")
 
 def handle_photo(update: Update, context: CallbackContext):
     update.message.reply_text(
@@ -59,41 +64,91 @@ def handle_photo(update: Update, context: CallbackContext):
         "Отправь название блюда словами — например, «гречка с курицей»."
     )
 
-# Создаём updater
-updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
+def error_handler(update: Update, context: CallbackContext):
+    """Обработчик ошибок"""
+    logger.error(f"Ошибка при обработке обновления: {context.error}")
+    if update and update.message:
+        update.message.reply_text("⚠️ Произошла ошибка. Попробуйте еще раз.")
 
-# Добавляем обработчики
-updater.dispatcher.add_handler(CommandHandler("start", start))
-updater.dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
-updater.dispatcher.add_handler(MessageHandler(Filters.photo, handle_photo))
-
-# FastAPI приложение для обработки Webhook
+# Создаём FastAPI приложение
 app = FastAPI()
 
-@app.post("/")
-async def handle_telegram_webhook(request: Request):
-    """Обрабатываем входящие обновления от Telegram"""
-    try:
-        update_data = await request.json()
-        # Добавляем обновление в очередь updater
-        updater.update_queue.put_nowait(Update.de_json(update_data))
-        return {"status": "ok"}
-    except Exception as e:
-        print(f"Ошибка при обработке webhook: {e}")
-        return {"status": "error"}
+# Инициализируем updater только один раз
+updater = None
+dispatcher = None
 
-def run_updater():
-    updater.start_polling()
-
-if __name__ == "__main__":
+def setup_bot():
+    """Инициализация бота"""
+    global updater, dispatcher
+    
     if not TELEGRAM_TOKEN:
         raise ValueError("TELEGRAM_TOKEN не установлен!")
     if not SPOONACULAR_KEY:
         raise ValueError("SPOONACULAR_KEY не установлен!")
+    
+    updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
+    dispatcher = updater.dispatcher
+    
+    # Добавляем обработчики
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
+    dispatcher.add_handler(MessageHandler(Filters.photo, handle_photo))
+    dispatcher.add_error_handler(error_handler)
+    
+    logger.info("Бот инициализирован")
 
-    # Запускаем updater в отдельном потоке
-    thread = threading.Thread(target=run_updater, daemon=True)
-    thread.start()
+@app.on_event("startup")
+async def startup_event():
+    """Запускаем бота при старте приложения"""
+    setup_bot()
+    
+    # Устанавливаем вебхук (важно для Railway!)
+    webhook_url = os.environ.get("RAILWAY_STATIC_URL", "")
+    if webhook_url:
+        # Если есть URL Railway, используем вебхук
+        webhook_url = f"{webhook_url}/webhook"
+        updater.bot.set_webhook(url=webhook_url)
+        logger.info(f"Вебхук установлен: {webhook_url}")
+    else:
+        # Для локальной разработки используем поллинг
+        logger.info("Используется поллинг (локальная разработка)")
+        updater.start_polling()
+        updater.idle()
 
-    # Запускаем FastAPI сервер
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), reload=False)
+@app.post("/webhook")
+async def handle_webhook(request: Request):
+    """Обработка вебхуков от Telegram"""
+    try:
+        # Получаем обновление
+        update_data = await request.json()
+        
+        # Создаем объект Update
+        update = Update.de_json(update_data, updater.bot)
+        
+        # Передаем обновление диспетчеру
+        dispatcher.process_update(update)
+        
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Ошибка при обработке вебхука: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.get("/")
+async def root():
+    """Корневой эндпоинт для проверки работы"""
+    return {"status": "bot is running", "service": "calorie-bot"}
+
+@app.get("/health")
+async def health_check():
+    """Эндпоинт для проверки здоровья"""
+    return {"status": "healthy"}
+
+if __name__ == "__main__":
+    # Проверяем переменные окружения
+    if not TELEGRAM_TOKEN or not SPOONACULAR_KEY:
+        logger.error("Не установлены TELEGRAM_TOKEN или SPOONACULAR_KEY!")
+        exit(1)
+    
+    # Запускаем сервер
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
