@@ -73,7 +73,7 @@ app = FastAPI()
 async def handle_telegram_webhook(request: Request):
     """Обрабатываем входящие обновления от Telegram"""
     update_data = await request.json()
-    update = Update.de_json(update_data)
+    update = Update.de_json(data=update_data)
     updater.process_update(update)
     return {"status": "ok"}
 
