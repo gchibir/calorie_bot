@@ -1,11 +1,10 @@
 import os
 import logging
-import asyncio
 import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Логирование для отладки
+# Логирование
 logging.basicConfig(level=logging.INFO)
 
 # Получаем токены из переменных окружения
@@ -69,7 +68,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    # Запускаем polling
+    # Запускаем polling (теперь через run_polling)
     app.run_polling()
 
 if __name__ == "__main__":
