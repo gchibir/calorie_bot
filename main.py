@@ -72,10 +72,15 @@ app = FastAPI()
 @app.post("/")
 async def handle_telegram_webhook(request: Request):
     """Обрабатываем входящие обновления от Telegram"""
-    update_data = await request.json()
-    update = Update.de_json(data=update_data)
-    updater.process_update(update)
-    return {"status": "ok"}
+    try:
+        update_data = await request.json()
+        update = Update(update_id=update_data['update_id'])
+        # Используем встроенный метод updater для обработки
+        await updater.update_queue.put(update)
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"Ошибка при обработке webhook: {e}")
+        return {"status": "error"}
 
 if __name__ == "__main__":
     if not TELEGRAM_TOKEN:
