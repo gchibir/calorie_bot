@@ -75,16 +75,17 @@ async def handle_telegram_webhook(request: Request):
     """Обрабатываем входящие обновления от Telegram"""
     try:
         update_data = await request.json()
+        # Создаём Update напрямую
         update = Update.de_json(update_data)
-        # Добавляем обновление в очередь
-        updater.bot._message_updates.append(update)
+        # Обрабатываем обновление
+        updater.process_update(update)
         return {"status": "ok"}
     except Exception as e:
         print(f"Ошибка при обработке webhook: {e}")
         return {"status": "error"}
 
 def run_updater():
-    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
     if not TELEGRAM_TOKEN:
