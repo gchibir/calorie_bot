@@ -3,6 +3,7 @@ import logging
 import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import asyncio
 
 # Логирование
 logging.basicConfig(level=logging.INFO)
@@ -68,8 +69,10 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    # Запускаем polling (теперь через run_polling)
-    app.run_polling()
+    # Запускаем бота через метод, который не использует Updater
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(app.run_polling())
 
 if __name__ == "__main__":
     main()
