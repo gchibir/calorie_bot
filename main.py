@@ -7,7 +7,6 @@ from telegram.ext import (
 )
 from fastapi import FastAPI, Request
 import uvicorn
-import threading
 
 # Логирование
 logging.basicConfig(
@@ -73,7 +72,7 @@ def error_handler(update: Update, context: CallbackContext):
 # Создаём FastAPI приложение
 app = FastAPI()
 
-# Инициализируем updater только один раз
+# Глобальные переменные для бота
 updater = None
 dispatcher = None
 
@@ -102,25 +101,25 @@ async def startup_event():
     """Запускаем бота при старте приложения"""
     setup_bot()
     
-    # Устанавливаем вебхук (важно для Railway!)
+    # Устанавливаем вебхук на корневой URL (важно для Telegram!)
     webhook_url = os.environ.get("RAILWAY_STATIC_URL", "")
     if webhook_url:
-        # Если есть URL Railway, используем вебхук
-        webhook_url = f"{webhook_url}/webhook"
-        updater.bot.set_webhook(url=webhook_url)
-        logger.info(f"Вебхук установлен: {webhook_url}")
+        # Устанавливаем вебхук на корневой URL
+        updater.bot.set_webhook(url=webhook_url)  # Без /webhook!
+        logger.info(f"Вебхук установлен на корневой URL: {webhook_url}")
     else:
         # Для локальной разработки используем поллинг
         logger.info("Используется поллинг (локальная разработка)")
         updater.start_polling()
         updater.idle()
 
-@app.post("/webhook")
+@app.post("/")
 async def handle_webhook(request: Request):
-    """Обработка вебхуков от Telegram"""
+    """Обработка вебхуков от Telegram (на корневом URL)"""
     try:
         # Получаем обновление
         update_data = await request.json()
+        logger.info(f"Получено обновление: {update_data}")
         
         # Создаем объект Update
         update = Update.de_json(update_data, updater.bot)
@@ -134,14 +133,36 @@ async def handle_webhook(request: Request):
         return {"status": "error", "message": str(e)}
 
 @app.get("/")
-async def root():
-    """Корневой эндпоинт для проверки работы"""
+async def root_get():
+    """Корневой эндпоинт для GET запросов"""
     return {"status": "bot is running", "service": "calorie-bot"}
 
 @app.get("/health")
 async def health_check():
     """Эндпоинт для проверки здоровья"""
     return {"status": "healthy"}
+
+@app.get("/setwebhook")
+async def set_webhook_manual():
+    """Ручная установка вебхука (для отладки)"""
+    try:
+        webhook_url = os.environ.get("RAILWAY_STATIC_URL", "")
+        if not webhook_url:
+            return {"error": "RAILWAY_STATIC_URL не установлен"}
+        
+        # Сбрасываем вебхук
+        updater.bot.delete_webhook()
+        
+        # Устанавливаем новый
+        result = updater.bot.set_webhook(url=webhook_url)
+        
+        return {
+            "status": "success",
+            "webhook_url": webhook_url,
+            "result": result
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 if __name__ == "__main__":
     # Проверяем переменные окружения
