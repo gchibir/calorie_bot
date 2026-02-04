@@ -2,7 +2,9 @@ import os
 import logging
 import requests
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+)
 from fastapi import FastAPI, Request
 import uvicorn
 
@@ -13,18 +15,15 @@ logging.basicConfig(level=logging.INFO)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 SPOONACULAR_KEY = os.environ.get("SPOONACULAR_KEY")
 
-# Создаём приложение
-app = Application.builder().token(TELEGRAM_TOKEN).build()
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+def start(update: Update, context: CallbackContext):
+    update.message.reply_text(
         "📸 Отправь фото еды или напиши название блюда — я подскажу калории!\n"
         "Примеры: «омлет», «банан», «пицца маргарита»"
     )
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_text(update: Update, context: CallbackContext):
     query = update.message.text.strip()
-    await update.message.reply_text("🔍 Ищу информацию о калориях...")
+    update.message.reply_text("🔍 Ищу информацию о калориях...")
 
     # Запрос к Spoonacular API
     url = "https://api.spoonacular.com/food/products/search"
@@ -42,37 +41,40 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             product = data["products"][0]
             title = product.get("title", query)
             calories = product.get("calories", "неизвестно")
-            await update.message.reply_text(
+            update.message.reply_text(
                 f"✅ {title}\n🔥 Калории: ~{calories} ккал на 100г"
             )
         else:
-            await update.message.reply_text(
+            update.message.reply_text(
                 "❌ Не нашёл информацию об этом блюде. Попробуй другое название."
             )
     except Exception as e:
-        await update.message.reply_text(f"⚠️ Ошибка: {str(e)}")
+        update.message.reply_text(f"⚠️ Ошибка: {str(e)}")
 
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+def handle_photo(update: Update, context: CallbackContext):
+    update.message.reply_text(
         "📸 Фото получено!\n"
         "⚠️ В бесплатной версии я пока распознаю только текст. "
         "Отправь название блюда словами — например, «гречка с курицей»."
     )
 
+# Создаём updater
+updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
+
 # Добавляем обработчики
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+updater.dispatcher.add_handler(CommandHandler("start", start))
+updater.dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
+updater.dispatcher.add_handler(MessageHandler(Filters.photo, handle_photo))
 
 # FastAPI приложение для обработки Webhook
-fastapi_app = FastAPI()
+app = FastAPI()
 
-@fastapi_app.post("/")
+@app.post("/")
 async def handle_telegram_webhook(request: Request):
     """Обрабатываем входящие обновления от Telegram"""
     update_data = await request.json()
     update = Update.de_json(update_data)
-    await app.update_queue.put(update)
+    updater.process_update(update)
     return {"status": "ok"}
 
 if __name__ == "__main__":
@@ -82,4 +84,4 @@ if __name__ == "__main__":
         raise ValueError("SPOONACULAR_KEY не установлен!")
 
     # Запускаем FastAPI сервер
-    uvicorn.run(fastapi_app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), reload=False)
